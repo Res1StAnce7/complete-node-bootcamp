@@ -1,6 +1,21 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { PlusCircle, X, Edit2 } from 'lucide-react';
 import MathContent from './MathContent';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 
 const topics = [
   'Time Complexity',
@@ -11,7 +26,56 @@ const topics = [
   'Sorting Algorithms',
 ];
 
-const TopicContent = ({ title, sections, onAddSection, onRemoveSection, onEditSection, searchTerm }) => {
+const SortableItem = ({ id, section, index, onEdit, onRemove }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id });
+
+  const style = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      className="relative p-4 border rounded-lg border-l-4 border-l-blue-500 bg-white shadow-sm hover:shadow-md transition-shadow"
+    >
+      <div className="absolute top-2 right-2 flex gap-2">
+        <button
+          className="p-1 text-gray-400 cursor-move"
+          {...listeners}
+        >
+          ≡
+        </button>
+        <button
+          onClick={() => onEdit(index, section)}
+          className="p-1 text-gray-500 hover:text-blue-500"
+        >
+          <Edit2 className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onRemove(index)}
+          className="p-1 text-gray-500 hover:text-red-500"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="whitespace-pre-wrap pt-2 text-gray-700 font-medium">
+        <MathContent content={section} />
+      </div>
+    </div>
+  );
+};
+
+
+const TopicContent = ({ title, sections, onAddSection, onRemoveSection, onEditSection, onReorderSections, searchTerm }) => {
   const [newContent, setNewContent] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
@@ -42,136 +106,102 @@ const TopicContent = ({ title, sections, onAddSection, onRemoveSection, onEditSe
     setIsAdding(true);
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+
+    if (active.id !== over.id) {
+      const oldIndex = sections.findIndex(s => s === active.id);
+      const newIndex = sections.findIndex(s => s === over.id);
+      onReorderSections(title, oldIndex, newIndex);
+    }
+  };
+
   return (
     <div className="p-6 bg-white rounded-lg shadow-lg">
-      <h2 className="text-2xl font-bold text-gray-800 mb-4">{title}</h2>
-  
-      <div className="space-y-4 mb-6">
-        {filteredSections?.length === 0 && searchTerm && (
-          <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">
-            No content found matching "{searchTerm}" in {title}
-          </div>
-        )}
-        {filteredSections.map((section, index) => (
-          <div 
-            key={index}
-            className="relative p-4 border rounded-lg border-l-4 border-l-blue-500 bg-white shadow-sm hover:shadow-md transition-shadow"
-            onClick={() => !isAdding && startEditing(index, section)}
-            style={{ cursor: isAdding ? 'default' : 'pointer' }}
-          >
-            {isAdding && editingIndex === index ? (
-              <div className="mb-4 p-4">
-                <textarea
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  className="w-full p-2 min-h-[500px] border rounded-lg mb-4 font-mono text-sm text-black"
-                  autoFocus
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsAdding(false);
-                      setEditingIndex(null);
-                      setNewContent('');
-                    }}
-                    className="px-4 py-2 border rounded-lg hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSave();
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    Update
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="absolute top-2 right-2 flex gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startEditing(index, section);
-                    }}
-                    className="p-1 text-gray-500 hover:text-blue-500"
-                    title="Edit"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveSection(title, index);
-                    }}
-                    className="p-1 text-gray-500 hover:text-red-500"
-                    title="Delete"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="whitespace-pre-wrap pt-2 text-gray-700 font-medium">
-  <MathContent content={section} />
-</div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-  
-      {/* Add Content section moved to bottom */}
-      <div className="border-t pt-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">{title}</h2>
         {!isAdding && (
-          <button 
+          <button
             onClick={() => {
               setIsAdding(true);
               setEditingIndex(null);
               setNewContent('');
             }}
-            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg flex items-center gap-2 hover:bg-blue-700 justify-center"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg flex items-center gap-2 hover:bg-blue-700"
           >
             <PlusCircle className="w-4 h-4" />
             Add Content
           </button>
         )}
-  
-        {isAdding && editingIndex === null && (
-          <div className="border rounded-lg bg-white shadow">
-            <textarea
-              value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              placeholder="Enter your content here... Use \[ \] for display math and \( \) for inline math"
-              className="w-full p-4 min-h-[400px] border-b rounded-t-lg font-mono text-sm text-black"
-              autoFocus
-            />
-            <div className="flex justify-end gap-2 p-4">
-              <button
-                onClick={() => {
-                  setIsAdding(false);
-                  setNewContent('');
-                }}
-                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {isAdding && editingIndex === null && (
+        <div className="mb-4 p-4 border rounded-lg bg-white shadow">
+          <textarea
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            placeholder="Enter your content here... Use \[ \] for display math and \( \) for inline math"
+            className="w-full p-2 min-h-[300px] border rounded-lg mb-4 font-mono text-sm text-black"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setIsAdding(false);
+                setNewContent('');
+              }}
+              className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={sections}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-4">
+            {filteredSections?.length === 0 && searchTerm && (
+              <div className="p-4 bg-yellow-50 text-yellow-800 rounded-lg">
+                No content found matching "{searchTerm}" in {title}
+              </div>
+            )}
+            {filteredSections.map((section, index) => (
+              <SortableItem
+                key={section}
+                id={section}
+                section={section}
+                index={index}
+                onEdit={startEditing}
+                onRemove={() => onRemoveSection(title, index)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 };
-
 const AlgorithmStudyApp = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTopic, setSelectedTopic] = useState(topics[0]);
@@ -266,6 +296,14 @@ const AlgorithmStudyApp = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleReorderSections = (topic, oldIndex, newIndex) => {
+    setAllContent(prev => ({
+      ...prev,
+      [topic]: arrayMove(prev[topic], oldIndex, newIndex)
+    }));
+  };
+
+
   const hasMatchingContent = useMemo(() => {
     if (!searchTerm) return true;
     return Object.values(allContent).some(sections =>
@@ -353,6 +391,7 @@ const AlgorithmStudyApp = () => {
           onAddSection={handleAddSection}
           onRemoveSection={handleRemoveSection}
           onEditSection={handleEditSection}
+          onReorderSections={handleReorderSections}
           searchTerm={searchTerm}
         />
       </div>
